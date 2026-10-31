@@ -33,6 +33,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Commit do Claude Fix push lên (actor = claude[bot]) cũng phải được review lại,
+          # nếu không bản fix của AI sẽ lọt qua gate mà không ai kiểm.
+          allowed_bots: "claude[bot]"
           prompt: |
             You are a senior Flutter/Dart reviewer. Review pull request #${{ github.event.pull_request.number }}.
 
