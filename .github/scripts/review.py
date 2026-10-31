@@ -17,6 +17,7 @@ import ai  # noqa: E402
 MARKER = "<!-- ai-review -->"
 SEVERITY_ICON = {"critical": "🔴", "major": "🟠", "minor": "🟡", "info": "🔵"}
 ORDER = ["critical", "major", "minor", "info"]
+WARN_START, WARN_END = "<!-- warn -->", "<!-- /warn -->"
 
 
 def render(result: dict) -> tuple[str, int]:
@@ -53,13 +54,22 @@ def main() -> int:
         result = json.loads(raw) if raw else None
     except json.JSONDecodeError:
         result = None
+    sha = os.getenv("HEAD_SHA", "")[:7]
     if not isinstance(result, dict):
-        msg = "⚠️ Claude không trả về kết quả (thiếu secret `CLAUDE_CODE_OAUTH_TOKEN`, hết quota hoặc lỗi mạng). Bỏ qua (fail-open)."
+        msg = (f"⚠️ Lần review cho commit `{sha}` bị lỗi (token, quota hoặc mạng — xem log Actions). "
+               "Bỏ qua (fail-open).")
         ai.log(msg)
-        ai.upsert_comment(pr, MARKER, f"## 🤖 AI Code Review (Claude)\n\n{msg}")
+        existing = ai.find_comment(pr, MARKER)
+        if existing:
+            # Giữ nguyên kết quả review trước, chỉ thay dòng cảnh báo ở đầu.
+            old = existing["body"].replace(MARKER, "", 1).split(WARN_END, 1)[-1].strip()
+            ai.upsert_comment(pr, MARKER, f"{WARN_START}\n> {msg}\n{WARN_END}\n\n{old}")
+        else:
+            ai.upsert_comment(pr, MARKER, f"## 🤖 AI Code Review (Claude)\n\n{msg}")
         return 0
 
     body, critical = render(result)
+    body = body.replace("## 🤖 AI Code Review (Claude)", f"## 🤖 AI Code Review (Claude) — commit `{sha}`", 1)
     ai.upsert_comment(pr, MARKER, body)
     ai.write_summary(body)
     if critical and os.getenv("FAIL_ON_CRITICAL", "true") == "true":
