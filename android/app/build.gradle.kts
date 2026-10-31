@@ -47,3 +47,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// demo-broken
+dependencies {
+    implementation("androidx.core:core-ktx:99.0.0")
+}
