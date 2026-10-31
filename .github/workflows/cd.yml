@@ -42,7 +42,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,34 +51,40 @@ jobs:
         id: collect
         run: python3 .github/scripts/cd_notes.py --collect
 
+      # claude-code-action không hỗ trợ event `push` -> gọi thẳng Claude Code CLI.
+      # Đây cũng chính là cách dùng trên GitLab CI / Jenkins.
       - name: Claude writes notes for testers
-        id: claude
         continue-on-error: true # AI lỗi vẫn build, notes sẽ là danh sách commit thô
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: |
-            You are preparing a QA build of a Flutter mobile app (environment: ${{ env.APP_ENV }}).
-            Changes since the previous ${{ env.APP_ENV }} build:
-            - commit list: `.cd/commits.txt`
-            - diff: `.cd/changes.diff`
-            Open source files if you need context.
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+          claude -p "$(cat <<'PROMPT'
+          You are preparing a QA build of a Flutter mobile app.
+          The environment name is in the APP_ENV variable shown below.
+          Changes since the previous build of this environment:
+          - commit list: .cd/commits.txt
+          - diff: .cd/changes.diff
+          Open source files if you need context.
 
-            1. `summary`: what changed, in plain language for testers (no jargon).
-            2. `changes`: grouped list of changes.
-            3. `qa_checklist`: concrete steps a tester should do ON A DEVICE for THESE changes
-               (screens, inputs, edge cases, Android vs iOS if relevant) + 1-2 regression checks of the main flow.
-            4. `risks`: anything that could break.
-            Write in Vietnamese. Never invent changes that are not in the commits.
-          claude_args: |
-            --max-turns 10
-            --allowedTools "Read,Grep,Glob"
-            --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"changes":{"type":"array","items":{"type":"object","properties":{"type":{"type":"string","enum":["feature","fix","improvement","internal"]},"description":{"type":"string"}},"required":["type","description"]}},"qa_checklist":{"type":"array","items":{"type":"string"}},"risks":{"type":"array","items":{"type":"string"}}},"required":["summary","qa_checklist"]}'
+          1. summary: what changed, in plain language for testers (no jargon).
+          2. changes: grouped list of changes.
+          3. qa_checklist: concrete steps a tester should do ON A DEVICE for THESE changes
+             (screens, inputs, edge cases, Android vs iOS if relevant) + 1-2 regression checks of the main flow.
+          4. risks: anything that could break.
+          Write in Vietnamese. Never invent changes that are not in the commits.
+          PROMPT
+          )
+          APP_ENV=$APP_ENV" \
+            --output-format json \
+            --max-turns 10 \
+            --allowedTools "Read,Grep,Glob" \
+            --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"changes":{"type":"array","items":{"type":"object","properties":{"type":{"type":"string","enum":["feature","fix","improvement","internal"]},"description":{"type":"string"}},"required":["type","description"]}},"qa_checklist":{"type":"array","items":{"type":"string"}},"risks":{"type":"array","items":{"type":"string"}}},"required":["summary","qa_checklist"]}' \
+            > .cd/claude.json
 
       - name: Render build notes
         run: python3 .github/scripts/cd_notes.py --render
         env:
-          NOTES_JSON: ${{ steps.claude.outputs.structured_output }}
           BASE_REF: ${{ steps.collect.outputs.base }}
 
       - uses: actions/upload-artifact@v4

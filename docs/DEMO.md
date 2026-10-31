@@ -45,11 +45,11 @@ Mẹo: chạy trước giờ seminar 5 phút để có sẵn kết quả, phòng
 ## ⑤ Build CD fail → AI giải thích
 
 ```bash
-./demo/run.sh 4      # release/demo-broken: minSdk = 16 (test vẫn pass, chỉ build native mới lỗi)
+./demo/run.sh 4      # release/demo-broken: nâng nhầm androidx.core lên 99.0.0 (test vẫn pass, chỉ build native mới lỗi)
 ```
 
-- CD → *Build Android* ❌ (lỗi Gradle/manifest dài, khó đọc).
-- ~1–2 phút sau: tab **Issues** có issue **🚨 CD failed trên release/demo-broken** — Claude chỉ ra dòng `minSdk` trong `android/app/build.gradle.kts` và cách sửa.
+- CD → *Build Android* ❌ (log Gradle dài, khó đọc).
+- ~1–2 phút sau: tab **Issues** có issue **🚨 CD failed trên release/demo-broken** — Claude chỉ ra dependency `androidx.core:core-ktx:99.0.0` không tồn tại trong `android/app/build.gradle.kts` và cách sửa.
 - `./demo/run.sh 4fix` → CD chạy lại xanh → issue **tự đóng** kèm comment.
 
 ## Dọn dẹp

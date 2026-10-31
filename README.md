@@ -74,6 +74,8 @@ Không build mỗi lần merge. Build khi **có ý định phát hành**:
 - **Bấm tay:** Actions → **CD** → *Run workflow* → chọn `staging` / `production` (+ iOS nếu cần).
 - **Nhánh release:** push `release/1.2.0` → tự build `staging`.
 
+Notes được viết bằng **Claude Code CLI** gọi trực tiếp (`claude -p … --json-schema …`) vì `claude-code-action` không hỗ trợ event `push` — đây cũng là cách dùng trên GitLab CI / Jenkins.
+
 Mỗi build gắn tag `build/<env>/<n>`; lần sau Claude chỉ đọc commit **kể từ tag đó** để viết notes cho tester.
 App hiển thị môi trường trên AppBar (`--dart-define=APP_ENV=staging`).
 

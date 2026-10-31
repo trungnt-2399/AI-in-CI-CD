@@ -2,7 +2,7 @@
 """Build notes for the mobile CD workflow.
 
   cd_notes.py --collect   write .cd/commits.txt + .cd/changes.diff (since last build/<env>/* tag)
-  cd_notes.py --render    turn Claude's JSON (NOTES_JSON) into build_notes.md + job summary
+  cd_notes.py --render    turn Claude CLI output (.cd/claude.json) into build_notes.md + job summary
 """
 
 from __future__ import annotations
@@ -50,6 +50,24 @@ def read(path: str) -> str:
         return ""
 
 
+def claude_result(raw: str) -> dict | None:
+    """Parse `claude -p --output-format json --json-schema` output."""
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict) or data.get("is_error"):
+        return None
+    out = data.get("structured_output") or data.get("result")
+    if isinstance(out, str):
+        try:
+            out = json.loads(out)
+        except json.JSONDecodeError:
+            m = re.search(r"\{.*\}", out, re.DOTALL)
+            out = json.loads(m.group(0)) if m else None
+    return out if isinstance(out, dict) else None
+
+
 def version() -> str:
     m = re.search(r"^version:\s*([^\s+]+)", read("pubspec.yaml"), re.MULTILINE)
     return m.group(1) if m else "?"
@@ -58,11 +76,7 @@ def version() -> str:
 def render() -> int:
     build = os.getenv("BUILD_NUMBER", "?")
     base = os.getenv("BASE_REF", "")
-    raw = os.getenv("NOTES_JSON", "").strip()
-    try:
-        d = json.loads(raw) if raw else None
-    except json.JSONDecodeError:
-        d = None
+    d = claude_result(read(f"{OUT_DIR}/claude.json"))
 
     lines = [f"# 📱 Build `{ENV}` #{build} — v{version()}", ""]
     lines.append(f"Thay đổi kể từ build trước: `{base}`" if base else "Bản build đầu tiên cho môi trường này.")
