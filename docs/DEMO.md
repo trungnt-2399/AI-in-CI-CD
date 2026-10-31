@@ -1,4 +1,4 @@
-# Kịch bản demo CI (~8 phút)
+# Kịch bản demo (~15 phút)
 
 Mở sẵn 2 tab: repo **Pull requests** và **Actions**.
 Mẹo: chạy trước giờ seminar 5 phút để có sẵn kết quả, phòng khi mạng/AI chậm.
@@ -23,6 +23,24 @@ Mẹo: chạy trước giờ seminar 5 phút để có sẵn kết quả, phòng
 - Đổi `~/ 10` thành `~/ 100` → test `SUN10` và widget test fail → `CI` ❌.
 - ~1 phút sau, comment **🩺 AI CI Doctor**: chỉ đúng dòng gây lỗi, giải thích kỳ vọng 216.000 vs thực tế, gợi ý sửa.
 - Live: sửa lại, push → CI xanh → comment tự đổi thành ✅ resolved.
+
+## ③ @claude fix
+
+- Trên PR kịch bản 1, comment: `@claude chỉ xoá secret và print, thêm test cho VIP50`.
+- Claude sửa trên nhánh PR, chạy `flutter analyze` + `flutter test`, push commit, comment tóm tắt.
+- Commit mới → CI + AI Review chạy lại trên chính bản fix của AI → người review xem diff rồi merge.
+
+## ④ Mobile CD
+
+```bash
+./demo/run.sh 3   # tạo nhánh release/<ngày-giờ> → CD build staging
+```
+(hoặc Actions → **CD** → *Run workflow* → `production`, tick iOS)
+
+- 3 job song song: *AI release notes*, *Build Android*, (*Build iOS*).
+- Summary của run: "Có gì mới" + **QA checklist** Claude viết theo commit kể từ build trước.
+- Tải APK ở **Artifacts**, cài lên máy thật: AppBar hiện `[staging]`.
+- Merge thêm 1 PR rồi build lại → notes chỉ liệt kê thay đổi mới (nhờ tag `build/staging/<n>`).
 
 ## Dọn dẹp
 

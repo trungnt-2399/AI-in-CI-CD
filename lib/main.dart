@@ -4,6 +4,9 @@ import 'cart.dart';
 
 void main() => runApp(const ShopApp());
 
+/// Môi trường build, truyền vào lúc build: --dart-define=APP_ENV=staging
+const appEnv = String.fromEnvironment('APP_ENV', defaultValue: 'dev');
+
 const products = <Product>[
   Product(id: 'tee', name: 'Sun* T-shirt', price: 150000),
   Product(id: 'mug', name: 'Coffee Mug', price: 90000),
@@ -38,7 +41,11 @@ class _ShopPageState extends State<ShopPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('AI CI/CD Demo Shop')),
+      appBar: AppBar(
+        title: Text(appEnv == 'production'
+            ? 'AI CI/CD Demo Shop'
+            : 'AI CI/CD Demo Shop [$appEnv]'),
+      ),
       body: Column(
         children: [
           Expanded(

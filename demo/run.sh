@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Seminar demo scenarios (CI). Usage: ./demo/run.sh <1|2|reset>
+# Seminar demo scenarios. Usage: ./demo/run.sh <1|2|3|reset>
 #   1  PR có lỗi bảo mật + logic tiền  -> AI Review báo Critical, check fail
 #   2  PR làm test fail                -> CI đỏ, AI CI Doctor giải thích + gợi ý fix
+#   3  Tạo nhánh release/*             -> CD build APK staging + AI viết notes/QA checklist
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -38,6 +39,14 @@ case "$scenario" in
     git commit -am "chore: reduce SUN10 promo"
     open_pr demo/2-sun-discount "chore: reduce SUN10 promo"
     ;;
+  3)
+    git checkout main && git pull --ff-only
+    branch="release/$(date +%Y%m%d-%H%M)"
+    git checkout -b "$branch"
+    git push -u origin "$branch"
+    echo "👉 https://github.com/$repo_url/actions/workflows/cd.yml (CD đang chạy cho $branch)"
+    git checkout main
+    ;;
   reset)
     git checkout main
     for b in demo/1-vip-discount demo/2-sun-discount; do
@@ -46,5 +55,5 @@ case "$scenario" in
     done
     ;;
   *)
-    sed -n '2,4p' "$0"; exit 1 ;;
+    sed -n '2,5p' "$0"; exit 1 ;;
 esac

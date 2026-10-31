@@ -1,85 +1,100 @@
 # AI in CI/CD — Flutter demo
 
-Demo cho seminar **"Ứng dụng AI vào CI/CD"** — giai đoạn 1: **CI**.
-App Flutter nhỏ (shop + mã giảm giá), mỗi PR được kiểm tra bởi pipeline thường + AI.
-AI là **Claude Code** chạy trong GitHub Actions (`anthropics/claude-code-action`), xác thực bằng token gói Claude Pro/Max.
+Demo cho seminar **"Ứng dụng AI vào CI/CD"** trên một app Flutter nhỏ (shop + mã giảm giá).
+AI là **Claude Code** chạy trong GitHub Actions ([`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action)).
 
 ```mermaid
 flowchart LR
-  PR[Dev mở / cập nhật PR] --> CI[CI: analyze + test]
-  PR --> REV[① AI Review<br/>Critical → fail]
-  CI -- fail --> DOC[② AI CI Doctor<br/>giải thích + gợi ý fix]
-  CI -- xanh lại --> RES[Doctor đánh dấu resolved]
-  REV & DOC -. người xem xét .-> HUMAN{Đồng ý?}
-  HUMAN -- "comment @claude fix ..." --> FIX[③ Claude Fix<br/>sửa + test + push vào nhánh PR]
-  FIX --> PR
+  subgraph CI["CI — mỗi Pull Request"]
+    PR[Dev mở / cập nhật PR] --> TEST[CI: analyze + test]
+    PR --> REV[① AI Review<br/>Critical → fail]
+    TEST -- fail --> DOC[② AI CI Doctor]
+    REV & DOC -. người đồng ý .-> FIX[③ @claude fix<br/>sửa + test + push]
+    FIX --> PR
+  end
+  subgraph CD["CD — khi muốn phát hành"]
+    REL[Bấm tay / nhánh release/*] --> NOTES[④ AI notes + QA checklist]
+    REL --> BUILD[Build APK / iOS]
+    NOTES & BUILD --> PUB[Artifact + tag build/env/n]
+  end
+  PR -- merge --> MAIN[main] -.-> REL
 ```
 
-| Workflow | Trigger | Làm gì |
+| Workflow | Khi nào chạy | Làm gì |
 |---|---|---|
-| `ci.yml` | PR, push main | `flutter analyze` + `flutter test` (không AI) |
-| `ai-review.yml` | PR | Claude review diff theo `.github/ai-review-rules.md` → JSON → comment sticky, **fail nếu có Critical** |
-| `claude-fix.yml` | comment `@claude` trên PR | Claude sửa trên nhánh PR, chạy analyze + test, push commit → CI + AI Review chạy lại |
-| `ai-ci-doctor.yml` | CI fail | Claude đọc log fail + diff + code → nguyên nhân gốc + cách sửa; CI xanh lại → đánh dấu resolved |
+| `ci.yml` | PR, push `main` | `flutter analyze` + `flutter test` (không AI) |
+| `ai-review.yml` | PR | Claude review diff theo `.github/ai-review-rules.md` → comment sticky, **fail nếu có Critical** |
+| `ai-ci-doctor.yml` | `CI` fail | Claude đọc log + diff + code → nguyên nhân gốc + cách sửa; CI xanh lại → đánh dấu resolved |
+| `claude-fix.yml` | comment `@claude …` trên PR | Claude sửa trên nhánh PR, chạy analyze + test, push commit → CI + AI Review chạy lại |
+| `cd.yml` | bấm tay (chọn staging/production) hoặc push `release/**` | Build APK (+AAB production, +iOS tuỳ chọn), Claude viết "có gì mới" + QA checklist, gắn tag mốc |
 
 ```
 .github/
-├── workflows/            khi nào chạy, chạy gì (YAML)
+├── workflows/             khi nào chạy, chạy gì
 ├── scripts/
-│   ├── ai.py             helper: gọi GitHub API, comment PR, ghi Summary
-│   ├── review.py         ① render JSON review của Claude + gate Critical
-│   └── ci_doctor.py      ② gom log/diff cho Claude + render chẩn đoán
-└── ai-review-rules.md    luật team → prompt của reviewer
+│   ├── ai.py              helper: GitHub API, comment PR, job summary
+│   ├── review.py          ① render review JSON + gate Critical
+│   ├── ci_doctor.py       ② gom log/diff cho Claude + render chẩn đoán
+│   └── cd_notes.py        ④ gom commit từ build trước + render build notes
+└── ai-review-rules.md     luật review của team (prompt)
+demo/run.sh                kịch bản demo
+docs/DEMO.md               kịch bản seminar
 ```
 
-## Setup Claude (1 lần)
+## Dùng lại cho repo của bạn
 
-Trên máy, trong thư mục repo chạy `claude` rồi gõ `/install-github-app` → chọn repo → nó cài Claude GitHub App và tạo secret `CLAUDE_CODE_OAUTH_TOKEN`.
-(Cách tay: `claude setup-token` → copy token → repo **Settings → Secrets and variables → Actions → New secret** `CLAUDE_CODE_OAUTH_TOKEN`.)
+1. Fork / copy repo.
+2. Tạo token: cài [Claude Code](https://docs.claude.com/en/docs/claude-code), chạy `claude setup-token` (cần gói Claude Pro/Max).
+3. Repo **Settings → Secrets and variables → Actions** → secret `CLAUDE_CODE_OAUTH_TOKEN`.
+4. Cài [Claude GitHub App](https://github.com/apps/claude) cho repo.
+5. **Settings → Rules → Rulesets → New branch ruleset** cho `main`:
+   - *Require a pull request before merging* (team ≥ 2 người: *Required approvals = 1*)
+   - *Require status checks to pass*: `Analyze & Test`, `AI Review`
+   - *Block force pushes*
 
-## Cách AI review hoạt động
+## AI review hoạt động thế nào
 
-1. Workflow gọi Claude Code với **prompt** (trong `ai-review.yml`) + quyền **chỉ đọc** (`Read, Grep, Glob, git diff/log/show`).
-2. Claude đọc `.github/ai-review-rules.md` (luật team, quyết định mức Critical/Major/…), chạy `git diff`, mở file liên quan nếu cần.
-3. Claude trả về **JSON theo schema** (`--json-schema`): summary + danh sách findings.
-4. `review.py` biến JSON thành comment trên PR; có `critical` → exit 1 → check đỏ.
+1. Workflow gọi Claude với **prompt** (`ai-review.yml`) + quyền **chỉ đọc** (`Read, Grep, Glob, git diff/log/show`).
+2. Claude đọc `.github/ai-review-rules.md` → `git diff` → mở file liên quan nếu cần.
+3. Trả về **JSON theo schema** (`--json-schema`) → `review.py` render comment, có `critical` → check đỏ.
 
-Muốn đổi cách review → sửa `ai-review-rules.md` (luật) hoặc `prompt` (cách làm). Không phải tool đóng của GitHub.
+Đổi cách review = sửa `ai-review-rules.md` (luật) hoặc `prompt` (cách làm). Có thể thêm `CLAUDE.md` cho convention dự án.
 
-## Luồng fix — có điều kiện, con người quyết định
+## Luồng fix — con người quyết định
 
-1. AI Review / CI Doctor chỉ **đề xuất**.
-2. Dev/lead đọc, đồng ý điểm nào thì comment trên PR, ví dụ `@claude fix lỗi Critical về secret, giữ nguyên VIP50`.
-3. Điều kiện chạy: comment trên PR + có `@claude` + người comment có quyền **write** (action tự kiểm tra).
-4. Claude sửa **trên nhánh PR** (không bao giờ push `main`, không sửa `.github/`), phải `flutter analyze` + `flutter test` pass mới commit.
-5. Commit mới → CI + AI Review chạy lại → người review xem diff → tự bấm Merge.
+- AI Review / CI Doctor chỉ **đề xuất**. Đồng ý thì comment, ví dụ `@claude chỉ xoá secret và print, giữ nguyên VIP50`.
+- Chỉ người có quyền **write** gọi được. Claude sửa **trên nhánh PR**, không đụng `main` / `.github/`, phải pass analyze + test mới commit.
+- Commit của Claude **cũng được AI Review lại** (`allowed_bots`) → người review xem diff → tự merge.
 
-## Thử luồng CI
+## CD — khi nào build?
 
-```bash
-./demo/run.sh 1   # PR có secret + logic tiền sai → AI Review báo Critical, check fail
-./demo/run.sh 2   # PR làm test fail → CI đỏ → AI CI Doctor comment nguyên nhân
-./demo/run.sh reset
-```
+Không build mỗi lần merge. Build khi **có ý định phát hành**:
 
-Chi tiết: [docs/DEMO.md](docs/DEMO.md).
+- **Bấm tay:** Actions → **CD** → *Run workflow* → chọn `staging` / `production` (+ iOS nếu cần).
+- **Nhánh release:** push `release/1.2.0` → tự build `staging`.
+
+Mỗi build gắn tag `build/<env>/<n>`; lần sau Claude chỉ đọc commit **kể từ tag đó** để viết notes cho tester.
+App hiển thị môi trường trên AppBar (`--dart-define=APP_ENV=staging`).
+
+Demo ký Android bằng debug key, iOS `--no-codesign`. Lộ trình thật: keystore từ secrets, fastlane `match`/`gym`, gửi Firebase App Distribution / TestFlight.
+
+## Bảo mật & giới hạn
+
+- **PR từ fork** không nhận secret → AI Review **bỏ qua (fail-open)**, CI thường vẫn chạy; maintainer review tay.
+- Claude review/doctor/notes chỉ có quyền **đọc**; CI Doctor không bao giờ **chạy** code của PR (tránh "pwn request" của `workflow_run`).
+- `@claude fix` chỉ chạy cho người có quyền write.
+- Không deterministic: cùng PR có thể ra kết quả hơi khác → chỉ chặn ở Critical, người review quyết định.
+- Fail-open có mặt trái: gate "xanh" khi AI không chạy. Comment review ghi rõ commit được review và cảnh báo khi lần chạy lỗi.
+- Tốn quota gói Claude → giới hạn `--max-turns`.
+- Code khách hàng: kiểm tra hợp đồng / chính sách dữ liệu trước khi cho AI đọc.
 
 ## Mang sang GitLab
 
 | GitHub | GitLab |
 |---|---|
 | `pull_request` | `rules: - if: $CI_PIPELINE_SOURCE == "merge_request_event"` |
-| `workflow_run` (CI Doctor) | job `when: on_failure` trong cùng pipeline, đọc log qua `/jobs/:id/trace` |
+| `workflow_run` (CI Doctor) | job `when: on_failure` cùng pipeline, đọc log qua `/jobs/:id/trace` |
+| `workflow_dispatch` inputs | *Run pipeline* với variables / Jenkins "Build with Parameters" |
+| Ruleset required checks | *Pipelines must succeed* + approval rules |
 | Comment PR | Notes API `POST /projects/:id/merge_requests/:iid/notes` |
-| `claude-code-action` | chạy `claude -p "..." --output-format json --json-schema ...` trong job (cài Claude Code CLI) |
-
-## Giới hạn
-
-- Dùng quota gói Claude; PR rất lớn tốn nhiều turn → giới hạn `--max-turns`.
-- Claude chỉ được quyền đọc; CI Doctor không bao giờ chạy code của PR (tránh "pwn request").
-- AI có thể sai → review chỉ chặn ở mức Critical, người review vẫn quyết định. AI lỗi → bỏ qua (fail-open).
-- Code khách hàng: kiểm tra hợp đồng/chính sách dữ liệu trước khi cho AI đọc code.
-
-## Giai đoạn sau
-
-CD (build Android/iOS khi bấm tay hoặc nhánh `release/*`, AI viết QA checklist) và release (store notes).
+| `claude-code-action` | `claude -p "..." --output-format json --json-schema ...` trong job |

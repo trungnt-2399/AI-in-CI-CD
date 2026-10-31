@@ -1,0 +1,184 @@
+# ④ Mobile CD — build app cho tester.
+#    Chạy khi: bấm tay (Actions > CD > Run workflow, chọn môi trường) hoặc push nhánh release/**.
+#    KHÔNG chạy mỗi lần merge PR.
+#
+#    notes ──────────┐
+#    build-android ──┼──> publish (summary + artifact + tag build/<env>/<n>)
+#    build-ios (tuỳ) ┘
+#
+#    AI: Claude đọc các commit kể từ lần build trước cùng môi trường -> viết
+#    "có gì mới" cho tester + QA checklist theo đúng thay đổi.
+name: CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Môi trường build
+        type: choice
+        options: [staging, production]
+        default: staging
+      build_ios:
+        description: Build thêm iOS (macOS runner, chậm hơn)
+        type: boolean
+        default: false
+  push:
+    branches: ["release/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.ref }}-${{ inputs.environment || 'staging' }}
+  cancel-in-progress: true
+
+env:
+  APP_ENV: ${{ inputs.environment || 'staging' }}
+  BUILD_NUMBER: ${{ github.run_number }}
+
+jobs:
+  notes:
+    name: AI release notes + QA checklist
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect changes since last build
+        id: collect
+        run: python3 .github/scripts/cd_notes.py --collect
+
+      - name: Claude writes notes for testers
+        id: claude
+        continue-on-error: true # AI lỗi vẫn build, notes sẽ là danh sách commit thô
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are preparing a QA build of a Flutter mobile app (environment: ${{ env.APP_ENV }}).
+            Changes since the previous ${{ env.APP_ENV }} build:
+            - commit list: `.cd/commits.txt`
+            - diff: `.cd/changes.diff`
+            Open source files if you need context.
+
+            1. `summary`: what changed, in plain language for testers (no jargon).
+            2. `changes`: grouped list of changes.
+            3. `qa_checklist`: concrete steps a tester should do ON A DEVICE for THESE changes
+               (screens, inputs, edge cases, Android vs iOS if relevant) + 1-2 regression checks of the main flow.
+            4. `risks`: anything that could break.
+            Write in Vietnamese. Never invent changes that are not in the commits.
+          claude_args: |
+            --max-turns 10
+            --allowedTools "Read,Grep,Glob"
+            --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"changes":{"type":"array","items":{"type":"object","properties":{"type":{"type":"string","enum":["feature","fix","improvement","internal"]},"description":{"type":"string"}},"required":["type","description"]}},"qa_checklist":{"type":"array","items":{"type":"string"}},"risks":{"type":"array","items":{"type":"string"}}},"required":["summary","qa_checklist"]}'
+
+      - name: Render build notes
+        run: python3 .github/scripts/cd_notes.py --render
+        env:
+          NOTES_JSON: ${{ steps.claude.outputs.structured_output }}
+          BASE_REF: ${{ steps.collect.outputs.base }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-notes
+          path: build_notes.md
+
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # Demo ký bằng debug key. Thực tế: decode keystore từ secrets -> android/key.properties.
+      - name: Build APK (+ AAB cho production)
+        run: |
+          flutter build apk --release --build-number=$BUILD_NUMBER --dart-define=APP_ENV=$APP_ENV
+          VERSION=$(grep '^version:' pubspec.yaml | sed -E 's/version: *([^+]+).*/\1/')
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/app-$APP_ENV-v$VERSION+$BUILD_NUMBER.apk"
+          if [ "$APP_ENV" = "production" ]; then
+            flutter build appbundle --release --build-number=$BUILD_NUMBER --dart-define=APP_ENV=$APP_ENV
+            cp build/app/outputs/bundle/release/app-release.aab "dist/app-$APP_ENV-v$VERSION+$BUILD_NUMBER.aab"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ env.APP_ENV }}-${{ github.run_number }}
+          path: dist/
+          retention-days: 14
+
+  build-ios:
+    name: Build iOS (no codesign)
+    if: inputs.build_ios == true
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # Chứng minh app compile được trên iOS. Thực tế: fastlane match + gym -> .ipa -> TestFlight.
+      - name: Build iOS
+        run: |
+          flutter build ios --release --no-codesign --build-number=$BUILD_NUMBER --dart-define=APP_ENV=$APP_ENV
+          cd build/ios/iphoneos && zip -qr "$GITHUB_WORKSPACE/Runner-$APP_ENV-$BUILD_NUMBER.app.zip" Runner.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-${{ env.APP_ENV }}-${{ github.run_number }}
+          path: Runner-*.app.zip
+          retention-days: 14
+
+  publish:
+    name: Publish build
+    needs: [notes, build-android, build-ios]
+    if: >-
+      always() &&
+      needs.build-android.result == 'success' &&
+      (needs.build-ios.result == 'success' || needs.build-ios.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # để gắn tag build/<env>/<n>
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: build-notes
+
+      - name: Job summary
+        run: |
+          [ -f build_notes.md ] && cat build_notes.md >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "📦 **Tải build:** mục **Artifacts** ở cuối trang này." >> "$GITHUB_STEP_SUMMARY"
+
+      # Mốc để lần build sau biết "thay đổi kể từ lần trước".
+      # Tag push bằng GITHUB_TOKEN không kích hoạt workflow khác.
+      - name: Tag build
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          TAG="build/$APP_ENV/$BUILD_NUMBER"
+          git tag -a "$TAG" -m "CD $APP_ENV build #$BUILD_NUMBER"
+          git push origin "$TAG"
