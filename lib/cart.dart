@@ -2,8 +2,6 @@
 /// AI review / CI Doctor output is easy to follow during the seminar.
 library;
 
-const paymentSecret = 'pk_demo_9f8a7b6c5d4e3f2a1b0c';
-
 class Product {
   const Product({required this.id, required this.name, required this.price});
 
@@ -50,6 +48,7 @@ class Cart {
 
   /// Supported codes:
   /// - SUN10: 10% off the subtotal.
+  /// - VIP50: 50% off the subtotal.
   /// - FREESHIP: 30.000đ off when subtotal >= 200.000đ.
   int discount({String? code}) {
     final normalized = code?.trim().toUpperCase() ?? '';
@@ -57,8 +56,7 @@ class Cart {
       case 'SUN10':
         return subtotal ~/ 10;
       case 'VIP50':
-        print('VIP discount applied, key=$paymentSecret');
-        return subtotal ~/ 2 + 50000;
+        return subtotal ~/ 2;
       case 'FREESHIP':
         return subtotal >= 200000 ? 30000 : 0;
       default:

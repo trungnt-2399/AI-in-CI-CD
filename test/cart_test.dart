@@ -51,6 +51,21 @@ void main() {
       expect(big.total(code: 'FREESHIP'), 210000);
     });
 
+    test('VIP50 gives 50% off and is case-insensitive', () {
+      final cart = Cart()..add(tee);
+      expect(cart.discount(code: ' vip50 '), 75000);
+      expect(cart.total(code: 'VIP50'), 75000);
+    });
+
+    test('VIP50 never makes the total negative for small subtotals', () {
+      final cart = Cart()
+        ..add(const Product(id: 'pen', name: 'Pen', price: 40000));
+      expect(cart.discount(code: 'VIP50'), 20000);
+      expect(cart.total(code: 'VIP50'), 20000);
+      expect(cart.total(code: 'VIP50'), greaterThanOrEqualTo(0));
+      expect(Cart().total(code: 'VIP50'), 0);
+    });
+
     test('unknown code gives no discount', () {
       final cart = Cart()..add(tee);
       expect(cart.total(code: 'HACKER'), 150000);
