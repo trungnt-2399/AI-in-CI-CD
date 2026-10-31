@@ -66,6 +66,22 @@ void main() {
       expect(Cart().total(code: 'VIP50'), 0);
     });
 
+    test('VIP50 rounds the discount down for odd subtotals', () {
+      final cart = Cart()
+        ..add(const Product(id: 'odd', name: 'Odd', price: 12345));
+      expect(cart.discount(code: 'VIP50'), 6172);
+      expect(cart.total(code: 'VIP50'), 6173);
+    });
+
+    test('VIP50 applies to the whole multi-item subtotal', () {
+      final cart = Cart()
+        ..add(tee)
+        ..add(mug, qty: 2);
+      expect(cart.subtotal, 330000);
+      expect(cart.discount(code: 'VIP50'), 165000);
+      expect(cart.total(code: 'VIP50'), 165000);
+    });
+
     test('unknown code gives no discount', () {
       final cart = Cart()..add(tee);
       expect(cart.total(code: 'HACKER'), 150000);
