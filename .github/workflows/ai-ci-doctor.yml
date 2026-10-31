@@ -1,11 +1,13 @@
-# ② AI CI Doctor: khi workflow "CI" fail -> lấy log fail + diff PR ->
-#    Claude tìm nguyên nhân gốc -> comment cách sửa lên PR.
+# ② AI CI Doctor: khi workflow "CI" (test) hoặc "CD" (build app) fail ->
+#    lấy log fail + diff -> Claude tìm nguyên nhân gốc ->
+#      - run từ PR: comment cách sửa lên PR
+#      - run CD / push (không có PR): mở GitHub issue cho nhánh đó, tự đóng khi build lại thành công
 #    Lưu ý: workflow_run luôn dùng phiên bản file này trên nhánh mặc định (main).
 name: AI CI Doctor
 
 on:
   workflow_run:
-    workflows: [CI]
+    workflows: [CI, CD]
     types: [completed]
 
 permissions:
@@ -15,13 +17,18 @@ permissions:
   issues: write
   id-token: write
 
+env:
+  WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+  HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+  RUN_EVENT: ${{ github.event.workflow_run.event }}
+
 jobs:
   diagnose:
     name: Diagnose failure
     if: github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
     steps:
-      # Scripts chạy từ main (tin cậy). Code của PR chỉ được checkout vào pr/ để Claude ĐỌC,
+      # Scripts chạy từ main (tin cậy). Code của nhánh lỗi chỉ được checkout vào pr/ để Claude ĐỌC,
       # không bao giờ thực thi -> tránh lỗ hổng "pwn request" của workflow_run.
       - uses: actions/checkout@v4
 
@@ -29,16 +36,16 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           path: pr
+          fetch-depth: 20
           persist-credentials: false
 
-      - name: Collect failed logs + PR diff
+      - name: Collect failed logs + diff
         id: collect
         run: python3 .github/scripts/ci_doctor.py --collect
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ github.event.workflow_run.id }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
 
       - name: Claude diagnoses
@@ -48,16 +55,17 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            The CI of a Flutter project failed. Find the ROOT CAUSE.
+            The "${{ env.WORKFLOW_NAME }}" workflow of a Flutter mobile project failed on branch `${{ env.HEAD_BRANCH }}`.
+            It may be tests/analyze (CI) or an Android Gradle / iOS Xcode build (CD). Find the ROOT CAUSE.
             - Failed logs: `.ci-doctor/failed.log`
-            - PR diff: `.ci-doctor/pr.diff`
-            - Source code of the PR is in `pr/` (e.g. `pr/lib/`, `pr/test/`). Open files to confirm.
-            Do not just repeat the error: explain WHY it happens and point to the exact change that caused it.
+            - Recent changes: `.ci-doctor/pr.diff`
+            - Source code (incl. `pr/android/`, `pr/ios/`, `pr/lib/`, `pr/test/`, `pr/pubspec.yaml`) is in `pr/`. Open files to confirm.
+            Do not just repeat the error: explain WHY it happens and point to the exact file/line or change that caused it.
             Write `title`, `root_cause`, `suggested_fix` in Vietnamese (suggested_fix may contain a short markdown code block).
           claude_args: |
             --max-turns 12
             --allowedTools "Read,Grep,Glob"
-            --json-schema '{"type":"object","properties":{"category":{"type":"string","enum":["test_failure","compile_error","lint","dependency","build","infra","flaky"]},"title":{"type":"string"},"root_cause":{"type":"string"},"failing":{"type":"array","items":{"type":"string"}},"suggested_fix":{"type":"string"},"confidence":{"type":"string","enum":["high","medium","low"]}},"required":["title","root_cause","suggested_fix"]}'
+            --json-schema '{"type":"object","properties":{"category":{"type":"string","enum":["test_failure","compile_error","lint","dependency","build","signing","infra","flaky"]},"title":{"type":"string"},"root_cause":{"type":"string"},"failing":{"type":"array","items":{"type":"string"}},"suggested_fix":{"type":"string"},"confidence":{"type":"string","enum":["high","medium","low"]}},"required":["title","root_cause","suggested_fix"]}'
 
       - name: Post diagnosis
         run: python3 .github/scripts/ci_doctor.py
@@ -69,7 +77,7 @@ jobs:
 
   resolved:
     name: Mark resolved
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -77,5 +85,4 @@ jobs:
       - run: python3 .github/scripts/ci_doctor.py --resolved
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}

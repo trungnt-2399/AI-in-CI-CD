@@ -42,6 +42,16 @@ Mẹo: chạy trước giờ seminar 5 phút để có sẵn kết quả, phòng
 - Tải APK ở **Artifacts**, cài lên máy thật: AppBar hiện `[staging]`.
 - Merge thêm 1 PR rồi build lại → notes chỉ liệt kê thay đổi mới (nhờ tag `build/staging/<n>`).
 
+## ⑤ Build CD fail → AI giải thích
+
+```bash
+./demo/run.sh 4      # release/demo-broken: minSdk = 16 (test vẫn pass, chỉ build native mới lỗi)
+```
+
+- CD → *Build Android* ❌ (lỗi Gradle/manifest dài, khó đọc).
+- ~1–2 phút sau: tab **Issues** có issue **🚨 CD failed trên release/demo-broken** — Claude chỉ ra dòng `minSdk` trong `android/app/build.gradle.kts` và cách sửa.
+- `./demo/run.sh 4fix` → CD chạy lại xanh → issue **tự đóng** kèm comment.
+
 ## Dọn dẹp
 
 ```bash

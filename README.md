@@ -16,6 +16,7 @@ flowchart LR
     REL[Bấm tay / nhánh release/*] --> NOTES[④ AI notes + QA checklist]
     REL --> BUILD[Build APK / iOS]
     NOTES & BUILD --> PUB[Artifact + tag build/env/n]
+    BUILD -- fail --> ISSUE[② CI Doctor mở issue]
   end
   PR -- merge --> MAIN[main] -.-> REL
 ```
@@ -24,7 +25,7 @@ flowchart LR
 |---|---|---|
 | `ci.yml` | PR, push `main` | `flutter analyze` + `flutter test` (không AI) |
 | `ai-review.yml` | PR | Claude review diff theo `.github/ai-review-rules.md` → comment sticky, **fail nếu có Critical** |
-| `ai-ci-doctor.yml` | `CI` fail | Claude đọc log + diff + code → nguyên nhân gốc + cách sửa; CI xanh lại → đánh dấu resolved |
+| `ai-ci-doctor.yml` | `CI` hoặc `CD` fail | Claude đọc log + diff + code → nguyên nhân gốc + cách sửa. Từ PR → comment PR; build CD (không có PR) → mở **issue**, build xanh lại → tự đóng |
 | `claude-fix.yml` | comment `@claude …` trên PR | Claude sửa trên nhánh PR, chạy analyze + test, push commit → CI + AI Review chạy lại |
 | `cd.yml` | bấm tay (chọn staging/production) hoặc push `release/**` | Build APK (+AAB production, +iOS tuỳ chọn), Claude viết "có gì mới" + QA checklist, gắn tag mốc |
 
