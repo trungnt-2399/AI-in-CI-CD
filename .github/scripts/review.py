@@ -39,8 +39,10 @@ def render(result: dict) -> tuple[str, int]:
         lines.append("")
     if counts["critical"]:
         lines.append("❌ **Có lỗi Critical → check `AI Review` fail, cần fix trước khi merge.**")
-    footer = ("\n\n---\n<sub>🤖 Claude Code · rules: `.github/ai-review-rules.md` · "
-              "AI có thể sai — người review vẫn là người quyết định.</sub>")
+    hint = ("\n\n> 🛠️ Đồng ý với finding nào thì comment, ví dụ: `@claude fix các lỗi Critical` "
+            "— Claude sẽ sửa trên nhánh này, chạy test rồi push commit để bạn review.") if findings else ""
+    footer = hint + ("\n\n---\n<sub>🤖 Claude Code · rules: `.github/ai-review-rules.md` · "
+                     "AI có thể sai — người review vẫn là người quyết định.</sub>")
     return "\n".join(lines) + footer, counts["critical"]
 
 

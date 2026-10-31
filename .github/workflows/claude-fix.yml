@@ -1,0 +1,48 @@
+# ③ AI Fix theo yêu cầu: người có quyền write comment "@claude ..." trên PR
+#    -> Claude sửa code trên CHÍNH nhánh của PR, tự chạy analyze + test, rồi push commit.
+#    -> Commit mới kích hoạt lại CI + AI Review như commit bình thường.
+#    Không tự động fix: chỉ chạy khi con người gọi, và vẫn phải review/merge bằng tay.
+name: Claude Fix
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+jobs:
+  fix:
+    name: Claude Fix
+    # Chỉ comment trên PR và có nhắc @claude. Action tự kiểm tra người comment có quyền write.
+    if: >-
+      contains(github.event.comment.body, '@claude') &&
+      (github.event.issue.pull_request || github.event_name == 'pull_request_review_comment')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Để Claude tự kiểm chứng bản sửa bằng analyze + test trước khi push.
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --max-turns 30
+            --allowedTools "Read,Edit,Write,Grep,Glob,Bash(flutter analyze:*),Bash(flutter test:*),Bash(dart format:*),Bash(git diff:*),Bash(git status:*),Bash(git log:*)"
+            --append-system-prompt "You are fixing a Flutter PR at the reviewer's request. Rules: (1) follow .github/ai-review-rules.md; (2) change only what the comment asks, keep the diff minimal; (3) never modify files under .github/; (4) add or update tests in test/ for any business-logic change; (5) run 'flutter analyze' and 'flutter test' and only commit when both pass, otherwise explain what failed; (6) reply in Vietnamese with a short summary of what you changed and why."

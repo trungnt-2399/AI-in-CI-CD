@@ -75,6 +75,7 @@ def post() -> int:
         f"### Nguyên nhân\n{d.get('root_cause', '')}\n\n"
         f"### Đang fail\n{failing}\n\n"
         f"### Cách sửa đề xuất\n{d.get('suggested_fix', '')}"
+        "\n\n> 🛠️ Đồng ý với chẩn đoán thì comment `@claude fix theo chẩn đoán CI Doctor`."
         "\n\n---\n<sub>🤖 Claude Code · AI có thể sai — hãy kiểm tra trước khi áp dụng.</sub>"
     )
     ai.write_summary(body)
