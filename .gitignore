@@ -26,3 +26,4 @@ build/
 # AI scripts output
 release_notes.md
 __pycache__/
+qa-notes.md
