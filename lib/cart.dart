@@ -2,6 +2,8 @@
 /// AI review / CI Doctor output is easy to follow during the seminar.
 library;
 
+const paymentSecret = 'pk_demo_9f8a7b6c5d4e3f2a1b0c';
+
 class Product {
   const Product({required this.id, required this.name, required this.price});
 
@@ -54,6 +56,9 @@ class Cart {
     switch (normalized) {
       case 'SUN10':
         return subtotal ~/ 10;
+      case 'VIP50':
+        print('VIP discount applied, key=$paymentSecret');
+        return subtotal ~/ 2 + 50000;
       case 'FREESHIP':
         return subtotal >= 200000 ? 30000 : 0;
       default:
