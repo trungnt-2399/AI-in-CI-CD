@@ -35,7 +35,12 @@ class AIError(RuntimeError):
 def _post(url: str, body: dict, headers: dict) -> dict:
     req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=120) as resp:
-        return json.loads(resp.read().decode())
+        raw = resp.read().decode(errors="replace")
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            raise AIError(f"Provider returned non-JSON (HTTP {resp.status}, "
+                          f"{resp.headers.get('Content-Type')}): {raw[:300]!r}") from None
 
 
 def chat(system: str, user: str, *, json_mode: bool = False, max_tokens: int = 1500,
@@ -62,6 +67,13 @@ def chat(system: str, user: str, *, json_mode: bool = False, max_tokens: int = 1
         try:
             data = _post(url, body, headers)
             return data["choices"][0]["message"]["content"] or ""
+        except (AIError, KeyError, IndexError) as e:
+            log(f"Bad AI response (attempt {attempt + 1}): {e}")
+            body.pop("response_format", None)  # some models reject JSON mode silently
+            if attempt < 3:
+                time.sleep(3)
+                continue
+            raise AIError(str(e)) from e
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:500]
             if e.code == 400 and "response_format" in body:

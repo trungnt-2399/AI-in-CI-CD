@@ -71,7 +71,7 @@ def main() -> int:
     rules = ai.read_file(".github/ai-review-rules.md", "(no extra rules)")
     try:
         result = ai.chat_json(SYSTEM.format(rules=rules), "Diff:\n```diff\n" + ai.truncate(diff, 18000) + "\n```")
-    except ai.AIError as e:
+    except Exception as e:  # noqa: BLE001 - AI problems must never block the PR (fail-open)
         ai.log(str(e))
         ai.upsert_comment(pr, MARKER, f"## 🤖 AI Code Review\n\n⚠️ Không gọi được AI: `{e}`\n\nBỏ qua (fail-open).")
         return 0

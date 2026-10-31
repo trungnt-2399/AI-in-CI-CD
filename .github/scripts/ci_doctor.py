@@ -19,7 +19,7 @@ import ai  # noqa: E402
 MARKER = "<!-- ai-ci-doctor -->"
 
 SYSTEM = """You are a CI troubleshooting expert for Flutter/Dart projects (flutter analyze,
-flutter test, flutter build, pub). Given failed CI logs and the PR diff, find the ROOT CAUSE.
+flutter test, pub, Android Gradle builds, iOS Xcode/CocoaPods builds). Given failed CI logs and the PR diff, find the ROOT CAUSE.
 Do not just repeat the error; explain WHY it happens and point to the exact code change that
 caused it when possible. Write in Vietnamese, keep code identifiers as-is.
 
@@ -75,7 +75,7 @@ def main() -> int:
     )
     try:
         d = ai.chat_json(SYSTEM, prompt)
-    except ai.AIError as e:
+    except Exception as e:  # noqa: BLE001
         ai.log(str(e))
         return 0
 
