@@ -1,6 +1,6 @@
-# ② AI CI Doctor: when "CI" fails, read the failed logs + PR diff,
-#    explain the root cause and suggest a fix as a PR comment.
-#    Note: workflow_run only uses the version of this file on the default branch.
+# ② AI CI Doctor: khi workflow "CI" fail -> lấy log fail + diff PR ->
+#    Claude tìm nguyên nhân gốc -> comment cách sửa lên PR.
+#    Lưu ý: workflow_run luôn dùng phiên bản file này trên nhánh mặc định (main).
 name: AI CI Doctor
 
 on:
@@ -13,7 +13,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
-  models: read
+  id-token: write
 
 jobs:
   diagnose:
@@ -21,17 +21,51 @@ jobs:
     if: github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
     steps:
+      # Scripts chạy từ main (tin cậy). Code của PR chỉ được checkout vào pr/ để Claude ĐỌC,
+      # không bao giờ thực thi -> tránh lỗ hổng "pwn request" của workflow_run.
       - uses: actions/checkout@v4
 
-      - name: Ask AI why CI failed
-        run: python3 .github/scripts/ci_doctor.py
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: pr
+          persist-credentials: false
+
+      - name: Collect failed logs + PR diff
+        id: collect
+        run: python3 .github/scripts/ci_doctor.py --collect
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
-          AI_MODEL: ${{ vars.AI_MODEL }}
+
+      - name: Claude diagnoses
+        id: claude
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            The CI of a Flutter project failed. Find the ROOT CAUSE.
+            - Failed logs: `.ci-doctor/failed.log`
+            - PR diff: `.ci-doctor/pr.diff`
+            - Source code of the PR is in `pr/` (e.g. `pr/lib/`, `pr/test/`). Open files to confirm.
+            Do not just repeat the error: explain WHY it happens and point to the exact change that caused it.
+            Write `title`, `root_cause`, `suggested_fix` in Vietnamese (suggested_fix may contain a short markdown code block).
+          claude_args: |
+            --max-turns 12
+            --allowedTools "Read,Grep,Glob"
+            --json-schema '{"type":"object","properties":{"category":{"type":"string","enum":["test_failure","compile_error","lint","dependency","build","infra","flaky"]},"title":{"type":"string"},"root_cause":{"type":"string"},"failing":{"type":"array","items":{"type":"string"}},"suggested_fix":{"type":"string"},"confidence":{"type":"string","enum":["high","medium","low"]}},"required":["title","root_cause","suggested_fix"]}'
+
+      - name: Post diagnosis
+        run: python3 .github/scripts/ci_doctor.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          PR_NUMBER: ${{ steps.collect.outputs.pr }}
+          DOCTOR_JSON: ${{ steps.claude.outputs.structured_output }}
 
   resolved:
     name: Mark resolved

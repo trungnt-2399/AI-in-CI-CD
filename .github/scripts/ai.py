@@ -1,110 +1,19 @@
-"""Tiny shared helpers for the AI CI/CD demo (stdlib only, no pip install).
+"""Shared helpers for the AI CI scripts (Python stdlib only).
 
-LLM provider is any OpenAI-compatible chat-completions endpoint:
-  - GitHub Models (default, free, uses the workflow GITHUB_TOKEN)
-  - Ollama / LM Studio / vLLM (self-hosted, e.g. on a GitLab runner)
-  - Any other gateway: set AI_BASE_URL + AI_API_KEY + AI_MODEL
+The AI itself runs in the workflow via anthropics/claude-code-action and returns
+structured JSON; these helpers only collect inputs and post results to GitHub.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
-import time
-import urllib.error
 import urllib.request
-
-AI_BASE_URL = os.getenv("AI_BASE_URL", "https://models.github.ai/inference").rstrip("/")
-AI_MODEL = os.getenv("AI_MODEL") or "openai/gpt-4o-mini"
-AI_API_KEY = os.getenv("AI_API_KEY") or os.getenv("GITHUB_TOKEN", "")
 
 GITHUB_API = os.getenv("GITHUB_API_URL", "https://api.github.com")
 REPO = os.getenv("GITHUB_REPOSITORY", "")
-
-
-class AIError(RuntimeError):
-    pass
-
-
-# --------------------------------------------------------------------------- LLM
-
-
-def _post(url: str, body: dict, headers: dict) -> dict:
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        raw = resp.read().decode(errors="replace")
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            raise AIError(f"Provider returned non-JSON (HTTP {resp.status}, "
-                          f"{resp.headers.get('Content-Type')}): {raw[:300]!r}") from None
-
-
-def chat(system: str, user: str, *, json_mode: bool = False, max_tokens: int = 1500,
-         temperature: float = 0.2) -> str:
-    body = {
-        "model": AI_MODEL,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-    if json_mode:
-        body["response_format"] = {"type": "json_object"}
-    headers = {
-        "Authorization": f"Bearer {AI_API_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    url = f"{AI_BASE_URL}/chat/completions"
-
-    for attempt in range(4):
-        try:
-            data = _post(url, body, headers)
-            return data["choices"][0]["message"]["content"] or ""
-        except (AIError, KeyError, IndexError) as e:
-            log(f"Bad AI response (attempt {attempt + 1}): {e}")
-            body.pop("response_format", None)  # some models reject JSON mode silently
-            if attempt < 3:
-                time.sleep(3)
-                continue
-            raise AIError(str(e)) from e
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode(errors="replace")[:500]
-            if e.code == 400 and "response_format" in body:
-                body.pop("response_format")  # provider without JSON mode -> retry plain
-                continue
-            if e.code in (429, 500, 502, 503) and attempt < 3:
-                wait = int(e.headers.get("Retry-After") or 10 * (attempt + 1))
-                log(f"AI provider returned {e.code}, retrying in {wait}s ...")
-                time.sleep(min(wait, 60))
-                continue
-            raise AIError(f"AI request failed ({e.code}): {detail}") from e
-        except urllib.error.URLError as e:
-            if attempt < 3:
-                time.sleep(5)
-                continue
-            raise AIError(f"AI request failed: {e}") from e
-    raise AIError("AI request failed after retries")
-
-
-def chat_json(system: str, user: str, **kw) -> dict:
-    text = chat(system + "\n\nRespond with ONLY a valid JSON object.", user, json_mode=True, **kw)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
-        raise AIError(f"Model did not return JSON: {text[:300]}")
-
-
-# ----------------------------------------------------------------------- helpers
 
 
 def log(msg: str) -> None:
@@ -119,20 +28,11 @@ def sh(*args: str, check: bool = True) -> str:
 
 
 def truncate(text: str, limit: int) -> str:
-    """Keep head + tail. Free GitHub Models tier has ~8k input tokens/request."""
+    """Keep head + tail of long logs/diffs."""
     if len(text) <= limit:
         return text
     head = limit // 3
-    tail = limit - head
-    return text[:head] + f"\n\n... [truncated {len(text) - limit} chars] ...\n\n" + text[-tail:]
-
-
-def read_file(path: str, default: str = "") -> str:
-    try:
-        with open(path, encoding="utf-8") as f:
-            return f.read()
-    except OSError:
-        return default
+    return text[:head] + f"\n\n... [truncated {len(text) - limit} chars] ...\n\n" + text[-(limit - head):]
 
 
 def set_output(name: str, value: str) -> None:
@@ -150,14 +50,6 @@ def write_summary(markdown: str) -> None:
             f.write(markdown + "\n")
     else:
         print(markdown)
-
-
-def footer() -> str:
-    return (f"\n\n---\n<sub>🤖 Generated by `{AI_MODEL}` · AI có thể sai — "
-            f"người review vẫn là người quyết định.</sub>")
-
-
-# ------------------------------------------------------------------- GitHub API
 
 
 def gh_api(method: str, path: str, payload: dict | None = None):

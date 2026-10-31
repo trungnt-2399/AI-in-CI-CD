@@ -1,5 +1,6 @@
-# ① AI Code Review: reviews the PR diff, posts a sticky comment,
-#    and FAILS the check when there are Critical findings (merge gate).
+# ① AI Code Review với Claude Code (agent chạy trong CI).
+#    Claude đọc diff + rules của team, có thể mở file để hiểu ngữ cảnh,
+#    trả về JSON có cấu trúc -> script của mình comment PR và FAIL nếu có Critical.
 name: AI Review
 
 on:
@@ -10,7 +11,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
-  models: read # GitHub Models via GITHUB_TOKEN, no API key needed
+  id-token: write
 
 concurrency:
   group: ai-review-${{ github.event.pull_request.number }}
@@ -26,12 +27,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Review diff with AI
+      - name: Claude reviews the diff
+        id: claude
+        continue-on-error: true # AI lỗi thì không chặn PR (fail-open)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are a senior Flutter/Dart reviewer. Review pull request #${{ github.event.pull_request.number }}.
+
+            1. Read the team rules in `.github/ai-review-rules.md` — they define severity. Follow them strictly.
+            2. Get the changes with: git diff ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+            3. Open related files if you need more context. Review ONLY the changed lines.
+            4. No praise, no style nits that `dart format` / `flutter analyze` already catch.
+
+            Write `summary`, `message`, `suggestion` in Vietnamese. Return an empty findings list if the diff is fine.
+          claude_args: |
+            --max-turns 15
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+            --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"verdict":{"type":"string","enum":["approve","request_changes","comment"]},"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["critical","major","minor","info"]},"file":{"type":"string"},"line":{"type":"integer"},"message":{"type":"string"},"suggestion":{"type":"string"}},"required":["severity","file","message"]}}},"required":["summary","findings"]}'
+
+      - name: Post review + gate on Critical
         run: python3 .github/scripts/review.py
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEW_JSON: ${{ steps.claude.outputs.structured_output }}
           FAIL_ON_CRITICAL: "true"
-          AI_MODEL: ${{ vars.AI_MODEL }}
