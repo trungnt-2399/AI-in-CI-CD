@@ -53,7 +53,7 @@ class Cart {
     final normalized = code?.trim().toUpperCase() ?? '';
     switch (normalized) {
       case 'SUN10':
-        return subtotal ~/ 10;
+        return subtotal ~/ 100; // promo reduced
       case 'FREESHIP':
         return subtotal >= 200000 ? 30000 : 0;
       default:
